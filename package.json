@@ -1,0 +1,12 @@
+{
+  "name": "cron-visualizer",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test",
+    "check": "node --check server.js && node --check src/cron.js && node --check public/app.js"
+  },
+  "engines": { "node": ">=20" }
+}
