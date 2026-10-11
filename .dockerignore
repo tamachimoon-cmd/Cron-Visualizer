@@ -1,0 +1,12 @@
+.git
+.github
+node_modules
+coverage
+.env
+*.log
+test
+docs
+README.md
+CONTRIBUTING.md
+SECURITY.md
+LICENSE
