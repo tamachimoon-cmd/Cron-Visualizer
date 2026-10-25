@@ -1,0 +1,62 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {CRON_FIELDS, describeCron, matchesCron, nextRuns, parseCron} from '../src/cron.js';
+
+const at = (year, month, day, hour = 0, minute = 0) => new Date(year, month - 1, day, hour, minute);
+
+test('cinco campos válidos', () => assert.equal(parseCron('*/15 9-17 * * MON-FRI').length, 5));
+test('campos são normalizados em maiúsculas', () => assert.deepEqual(parseCron('0 9 * jan mon'), ['0','9','*','JAN','MON']));
+test('nomes dos campos são documentados', () => assert.equal(CRON_FIELDS.length, 5));
+test('quatro campos são rejeitados', () => assert.throws(() => parseCron('* * * *'), /5 campos/));
+test('seis campos são rejeitados', () => assert.throws(() => parseCron('* * * * * *'), /5 campos/));
+test('expressão vazia é rejeitada', () => assert.throws(() => parseCron('')));
+test('expressão não textual é rejeitada', () => assert.throws(() => parseCron(null), /texto/));
+test('expressão com mais de 200 caracteres é rejeitada', () => assert.throws(() => parseCron('a'.repeat(201)), /200/));
+test('minuto fora da faixa é rejeitado', () => assert.throws(() => parseCron('61 * * * *'), /minuto/));
+test('hora fora da faixa é rejeitada', () => assert.throws(() => parseCron('0 24 * * *'), /hora/));
+test('dia zero é rejeitado', () => assert.throws(() => parseCron('0 0 0 * *'), /dia do mês/));
+test('mês fora da faixa é rejeitado', () => assert.throws(() => parseCron('0 0 * 13 *'), /mês/));
+test('dia da semana fora da faixa é rejeitado', () => assert.throws(() => parseCron('0 0 * * 8'), /dia da semana/));
+test('valores negativos são rejeitados', () => assert.throws(() => parseCron('-1 * * * *')));
+test('passo zero é rejeitado', () => assert.throws(() => parseCron('*/0 * * * *'), /passo/));
+test('passo enorme é rejeitado', () => assert.throws(() => parseCron('*/100001 * * * *'), /passo/));
+test('passo não numérico é rejeitado', () => assert.throws(() => parseCron('*/x * * * *'), /passo/));
+test('intervalo invertido é rejeitado', () => assert.throws(() => parseCron('20-10 * * * *'), /invertido/));
+test('listas vazias são rejeitadas', () => assert.throws(() => parseCron('1,,2 * * * *'), /vazio/));
+test('intervalos malformados são rejeitados', () => assert.throws(() => parseCron('1-2-3 * * * *'), /intervalo/));
+test('nomes de mês são aceitos', () => assert.equal(matchesCron('0 9 * JAN *', at(2026,1,5,9)), true));
+test('nomes de dia da semana são aceitos', () => assert.equal(matchesCron('0 9 * * MON-FRI', at(2026,9,28,9)), true));
+test('domingo 7 é aceito como 0', () => assert.equal(matchesCron('0 9 * * 7', at(2026,9,27,9)), true));
+test('domingo não corresponde a dias úteis', () => assert.equal(matchesCron('0 9 * * MON-FRI', at(2026,9,27,9)), false));
+test('passos funcionam em intervalos de dias', () => assert.equal(matchesCron('0 9 * * MON-FRI/2', at(2026,9,30,9)), true));
+test('listas funcionam', () => assert.equal(matchesCron('0 9,10 * * *', at(2026,9,28,10)), true));
+test('dia do mês é respeitado quando dia da semana é livre', () => assert.equal(matchesCron('0 12 1 * *', at(2026,9,2,12)), false));
+test('dia da semana é respeitado quando dia do mês é livre', () => assert.equal(matchesCron('0 12 * * MON', at(2026,9,1,12)), false));
+test('dia do mês OU dia da semana quando ambos são restritos', () => {
+  assert.equal(matchesCron('0 12 1 * MON', at(2026,9,1,12)), true);
+  assert.equal(matchesCron('0 12 1 * MON', at(2026,9,7,12)), true);
+  assert.equal(matchesCron('0 12 1 * MON', at(2026,9,2,12)), false);
+});
+test('minuto e hora devem corresponder', () => assert.equal(matchesCron('30 9 * * *', at(2026,9,28,9,31)), false));
+test('data inválida é rejeitada', () => assert.throws(() => matchesCron('* * * * *', new Date('invalid')), /Data inválida/));
+test('próximas duas execuções são encontradas', () => assert.equal(nextRuns('0 9 * * *', 2, at(2026,9,28,8,58)).length, 2));
+test('execução atual não é incluída', () => assert.equal(nextRuns('* * * * *', 1, at(2026,9,28,9,0))[0].getTime(), at(2026,9,28,9,1).getTime()));
+test('execução seguinte arredonda segundos', () => {
+  const from = new Date(at(2026,9,28,9,0).getTime() + 15_000);
+  assert.equal(nextRuns('* * * * *', 1, from)[0].getTime(), at(2026,9,28,9,1).getTime());
+});
+test('contagem zero é rejeitada', () => assert.throws(() => nextRuns('* * * * *', 0), /Quantidade/));
+test('contagem maior que vinte é rejeitada', () => assert.throws(() => nextRuns('* * * * *', 21), /Quantidade/));
+test('contagem fracionária é rejeitada', () => assert.throws(() => nextRuns('* * * * *', 1.5), /Quantidade/));
+test('data inicial inválida é rejeitada', () => assert.throws(() => nextRuns('* * * * *', 1, new Date('invalid')), /Data inicial/));
+test('próximas execuções vêm em ordem crescente', () => {
+  const runs = nextRuns('*/15 * * * *', 4, at(2026,9,28,9,1));
+  assert.ok(runs.every((date, index) => index === 0 || date > runs[index - 1]));
+});
+test('anos bissextos são tratados', () => assert.equal(nextRuns('0 0 29 FEB *', 1, at(2024,2,28))[0].getDate(), 29));
+test('descrição de horário fixo', () => assert.match(describeCron('0 9 * * MON-FRI'), /09:00/));
+test('descrição a cada minuto', () => assert.match(describeCron('* * * * *'), /A cada minuto/));
+test('descrição a cada quinze minutos', () => assert.match(describeCron('*/15 * * * *'), /15 minutos/));
+test('descrição menciona o mês', () => assert.match(describeCron('0 9 * JAN *'), /meses JAN/));
+test('descrição menciona a regra OU', () => assert.match(describeCron('0 12 1 * MON'), /OU/));
+test('descrição rejeita expressões inválidas', () => assert.throws(() => describeCron('* * *')));
